@@ -1,0 +1,39 @@
+# Local dev artefacts that should never enter the image
+.venv/
+.env
+.env.*
+!.env.example
+
+# VCS
+.git/
+.gitignore
+.github/
+
+# Python build / cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+
+# Model files — these are huge and belong in a mounted volume, not the image
+*.gguf
+*.safetensors
+*.bin
+models/
+
+# Docs / project meta we don't need at runtime
+README.md
+LICENSE
+openapi.json
+docs/

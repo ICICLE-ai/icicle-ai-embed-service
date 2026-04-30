@@ -1,0 +1,23 @@
+[project]
+name = "icicle-ai-embed-service"
+version = "0.1.0"
+description = "ICICLE AI Embedding Service (FastAPI + llama-cpp + Qwen3-Embedding GGUF)"
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.27",
+  "pydantic>=2.6",
+  "pydantic-settings>=2.2",
+  "python-dotenv>=1.0",
+  "pyjwt[crypto]>=2.9",
+  "llama-cpp-python>=0.3.2",
+  "huggingface-hub>=0.24",
+]
+
+[project.urls]
+Homepage = "https://github.com/ICICLE-ai/icicle-ai-embed-service"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
