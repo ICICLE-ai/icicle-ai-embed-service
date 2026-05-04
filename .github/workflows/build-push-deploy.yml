@@ -12,6 +12,9 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ vars.IMAGE_NAME }}
+  TAPIS_ISSUER: ${{ vars.TAPIS_ISSUER }}
+  TAPIS_JWKS_URL: ${{ vars.TAPIS_JWKS_URL }}
+  TAPIS_TENANT_ID: ${{ vars.TAPIS_TENANT_ID }}
 
 jobs:
   test:
