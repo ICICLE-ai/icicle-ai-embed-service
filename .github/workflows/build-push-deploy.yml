@@ -117,6 +117,9 @@ jobs:
       - name: Smoke-test latest image
         run: |
           docker run --rm --entrypoint python \
+            -e TAPIS_ISSUER="$TAPIS_ISSUER" \
+            -e TAPIS_JWKS_URL="$TAPIS_JWKS_URL" \
+            -e TAPIS_TENANT_ID="$TAPIS_TENANT_ID" \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
             -c "from src.app import auth, embedder, schemas, settings; print('all imports ok')"
 
