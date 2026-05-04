@@ -15,9 +15,25 @@ dependencies = [
   "huggingface-hub>=0.24",
 ]
 
+[project.optional-dependencies]
+test = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "httpx>=0.27",
+  "cryptography>=42.0",
+]
+
 [project.urls]
 Homepage = "https://github.com/ICICLE-ai/icicle-ai-embed-service"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+asyncio_mode = "auto"
+markers = [
+  "live: live smoke tests against a real running service (slow, opt-in)",
+]

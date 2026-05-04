@@ -1,0 +1,155 @@
+name: Build & Push & Deploy
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - "v*.*.*"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ vars.IMAGE_NAME }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        run: pip install --upgrade uv
+
+      - name: Install project + test extras
+        run: uv pip install --system -e ".[test]"
+
+      - name: Run pytest
+        run: pytest -v --tb=short
+
+  build-and-push-images:
+    runs-on: ubuntu-latest
+    needs: [test]
+    if: github.event_name != 'pull_request'
+
+    permissions:
+      contents: write   # required by softprops/action-gh-release to create Releases
+      packages: write
+
+    outputs:
+      version_tag: ${{ steps.tags.outputs.version_tag }}
+      image_tags: ${{ steps.tags.outputs.image_tags }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Compute Docker tags
+        id: tags
+        shell: bash
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+
+            echo "version_tag=${VERSION}" >> "$GITHUB_OUTPUT"
+
+            {
+              echo "image_tags<<EOF"
+              echo "${IMAGE}:latest"
+              echo "${IMAGE}:${VERSION}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "version_tag=latest" >> "$GITHUB_OUTPUT"
+
+            {
+              echo "image_tags<<EOF"
+              echo "${IMAGE}:latest"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ vars.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Build & push multi-arch image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.tags.outputs.image_tags }}
+          # OCI labels surface metadata in the GHCR Packages sidebar (Source link,
+          # description, version) and tie each image back to the commit it was built from.
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=ICICLE AI Embed Service — FastAPI + llama.cpp + Qwen3-Embedding GGUF
+            org.opencontainers.image.licenses=GPL-3.0
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.tags.outputs.version_tag }}
+            org.opencontainers.image.title=icicle-ai-embed-service
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test latest image
+        run: |
+          docker run --rm --entrypoint python \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            -c "from src.app import auth, embedder, schemas, settings; print('all imports ok')"
+
+      # On a v*.*.* tag push, populate the repo's "Releases" sidebar with an
+      # auto-generated changelog (built from PR titles since the previous tag).
+      # Skipped on regular main pushes — those only update :latest, no Release.
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          name: v${{ steps.tags.outputs.version_tag }}
+          body: |
+            Container image: `ghcr.io/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.version_tag }}`
+
+            Multi-arch build for `linux/amd64` and `linux/arm64`.
+
+  deploy-prod:
+    runs-on: ubuntu-latest
+    needs: [build-and-push-images]
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Restart production Tapis pod
+        uses: fjogeleit/http-request-action@v1
+        with:
+          url: 'https://icicleai.tapis.io/v3/pods/${{ vars.POD_ID }}/restart'
+          method: 'GET'
+          customHeaders: '{"Content-Type": "application/json", "X-Tapis-Token": "${{ secrets.TAPIS_ICICLE_PROD_TOKEN }}"}'
+
+      - name: Wait for pod restart
+        run: sleep 120
+
+      - name: Check production health
+        run: |
+          curl --fail --show-error --silent \
+            "${{ vars.PROD_BASE_URL }}/healthz"

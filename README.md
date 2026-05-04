@@ -60,9 +60,9 @@ cp .env.example .env
 | `N_BATCH`                | no       | Compute-graph batch size. Default `512`.                                                             |
 | `MAX_INPUTS_PER_REQUEST` | no       | DOS guard. Cap on the number of strings per `/v1/embed` call. Default `256`.                        |
 | `MAX_CHARS_PER_INPUT`    | no       | DOS guard. Cap on length of any single input string. Default `200000`.                              |
-| `TAPIS_ISSUER`           | yes      | JWT issuer to validate (`https://icicleai.tapis.io/v3/tokens`).                                      |
-| `TAPIS_JWKS_URL`         | yes      | JWKS endpoint for token signature verification.                                                      |
-| `TAPIS_TENANT_ID`        | yes      | Allowed Tapis tenant (`icicleai`).                                                                   |
+| `TAPIS_ISSUER`           | no       | JWT issuer to validate. Defaults to `https://icicleai.tapis.io/v3/tokens`.                           |
+| `TAPIS_JWKS_URL`         | no       | JWKS endpoint for token signature verification. Defaults to ICICLE's JWKS endpoint.                  |
+| `TAPIS_TENANT_ID`        | no       | Allowed Tapis tenant. Defaults to `icicleai`.                                                        |
 | `APP_ENV`                | no       | `dev` or `prod`.                                                                                     |
 | `ALLOWED_ORIGINS`        | no       | JSON array of CORS origins. Defaults to `["*"]`.                                                     |
 
@@ -244,6 +244,12 @@ For larger Qwen variants, swap `MODEL_REPO` to `Qwen/Qwen3-Embedding-4B-GGUF` (d
 # Explanation
 
 ## Architecture
+
+![ICICLE AI Embed Service architecture](assets/icicle-embed-service-architecture.png)
+
+The diagram above shows how the service sits between client requests and the underlying model on Tapis Pods, with persistent volume storage for cached GGUF weights and the workflow-driven path from GitHub to GHCR to the running pod.
+
+For a closer look at what happens **inside** a single request — auth, validation, the serialized embedder, and pooling — the textual flow below maps to the actual code path in `src/app/`:
 
 ```
                     ICICLE AI Embed Service
