@@ -29,9 +29,15 @@ COPY src/ ./src/
 
 # Cache pip's wheel cache and ccache between builds — the heavy line is the
 # llama-cpp-python C++ compile, and these mounts skip it after the first build.
+#
+# Prefer wheels from the upstream CPU wheel index so linux/arm64 builds do not
+# compile llama.cpp from source (especially slow under QEMU on amd64 runners).
 RUN --mount=type=cache,target=/root/.cache/pip \
     --mount=type=cache,target=/root/.cache/ccache \
-    pip install --prefix=/install .
+    pip install --prefix=/install \
+        --prefer-binary \
+        --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
+        .
 
 # Drop dev-only packages that ride along with pip but aren't needed at runtime.
 RUN find /install/lib/python3.11/site-packages -maxdepth 1 \

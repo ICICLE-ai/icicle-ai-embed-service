@@ -43,8 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test]
     if: github.event_name != 'pull_request'
-    # Covers multi-arch build + smoke + optional release. Raise if cold-cache builds legitimately exceed this.
-    timeout-minutes: 40
+    # Native linux/amd64 on ubuntu-latest (same pattern as other ICICLE GHCR workflows: no platforms:).
+    timeout-minutes: 35
 
     permissions:
       contents: write   # required by softprops/action-gh-release to create Releases
@@ -85,9 +85,6 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -98,13 +95,12 @@ jobs:
           username: ${{ vars.GHCR_USERNAME }}
           password: ${{ secrets.GHCR_TOKEN }}
 
-      - name: Build & push multi-arch image
+      - name: Build & push Docker image
         uses: docker/build-push-action@v6
-        timeout-minutes: 34
+        timeout-minutes: 30
         with:
           context: .
           push: true
-          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.tags.outputs.image_tags }}
           # OCI labels surface metadata in the GHCR Packages sidebar (Source link,
           # description, version) and tie each image back to the commit it was built from.
@@ -138,7 +134,7 @@ jobs:
           body: |
             Container image: `ghcr.io/${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.version_tag }}`
 
-            Multi-arch build for `linux/amd64` and `linux/arm64`.
+            Image is **linux/amd64** (GitHub `ubuntu-latest` default; no cross-arch build).
 
   deploy-prod:
     runs-on: ubuntu-latest
