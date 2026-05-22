@@ -147,13 +147,18 @@ jobs:
     timeout-minutes: 12
 
     steps:
+      # The pod lives in the icicleai tenant, so the API URL is icicleai.tapis.io.
+      # The token (TAPIS_DEPLOY_TOKEN) is a long-lived service token from the TACC
+      # tenant — TACC is the parent tenant in Tapis's hierarchy and is authorized
+      # to manage Pods in child tenants like icicleai. URL == where the resource
+      # lives; token tenant == who the caller is. They don't have to match.
       - name: Restart production Tapis pod
         timeout-minutes: 2
         uses: fjogeleit/http-request-action@v1
         with:
           url: 'https://icicleai.tapis.io/v3/pods/${{ vars.POD_ID }}/restart'
           method: 'GET'
-          customHeaders: '{"Content-Type": "application/json", "X-Tapis-Token": "${{ secrets.TAPIS_ICICLE_PROD_TOKEN }}"}'
+          customHeaders: '{"Content-Type": "application/json", "X-Tapis-Token": "${{ secrets.TAPIS_DEPLOY_TOKEN }}"}'
 
       - name: Wait for pod restart
         run: sleep 120
