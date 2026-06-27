@@ -90,4 +90,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
     CMD python -c "import urllib.request,sys; \
         sys.exit(0) if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3).status==200 else sys.exit(1)" || exit 1
 
-ENTRYPOINT ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --workers 2: each worker is its own process with its own Llama instance and
+# lock, so two embeddings run in parallel. Note this ~doubles model memory
+# (and GPU/VRAM if layers are offloaded) — size the pod accordingly.
+ENTRYPOINT ["uvicorn", "src.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
