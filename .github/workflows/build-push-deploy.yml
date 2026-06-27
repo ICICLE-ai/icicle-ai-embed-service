@@ -93,7 +93,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ vars.GHCR_USERNAME }}
-          password: ${{ secrets.GHCR_TOKEN }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
 
       - name: Build & push Docker image
         uses: docker/build-push-action@v6
@@ -148,7 +148,7 @@ jobs:
 
     steps:
       # The pod lives in the icicleai tenant, so the API URL is icicleai.tapis.io.
-      # The token (TAPIS_ICICLE_PROD_TOKEN) is a long-lived service token from the TACC
+      # The token (TAPIS_TOKEN) is a long-lived service token from the TACC
       # tenant — TACC is the parent tenant in Tapis's hierarchy and is authorized
       # to manage Pods in child tenants like icicleai. URL == where the resource
       # lives; token tenant == who the caller is. They don't have to match.
@@ -158,17 +158,30 @@ jobs:
         with:
           url: 'https://icicleai.tapis.io/v3/pods/${{ vars.POD_ID }}/restart'
           method: 'GET'
-          customHeaders: '{"Content-Type": "application/json", "X-Tapis-Token": "${{ secrets.TAPIS_ICICLE_PROD_TOKEN }}"}'
+          customHeaders: '{"Content-Type": "application/json", "X-Tapis-Token": "${{ secrets.TAPIS_TOKEN }}"}'
 
+      # Give the pod time to be re-spun before we even start polling. After a
+      # restart it sits in a creating/starting phase, and the model load in the
+      # lifespan delays /healthz further — so hit it too early and it errors out.
       - name: Wait for pod restart
         run: sleep 120
 
+      # Poll instead of failing on the first error: the pod may still be starting
+      # when we begin. Budget ~180s of retries (well over the 90s minimum buffer)
+      # so a slow-to-start pod doesn't crash the deploy.
       - name: Check production health
-        timeout-minutes: 4
+        timeout-minutes: 5
         run: |
-          curl --fail --show-error --silent \
-            --connect-timeout 10 \
-            --max-time 25 \
-            --retry 3 \
-            --retry-delay 4 \
-            "${{ vars.PROD_BASE_URL }}/healthz"
+          URL="${{ vars.PROD_BASE_URL }}/healthz"
+          for attempt in $(seq 1 30); do
+            if curl --fail --show-error --silent \
+                 --connect-timeout 10 --max-time 15 "$URL"; then
+              echo ""
+              echo "Service healthy (attempt ${attempt}/30)."
+              exit 0
+            fi
+            echo "Attempt ${attempt}/30: pod not ready yet, retrying in 6s..."
+            sleep 6
+          done
+          echo "Service did not become healthy within the polling window."
+          exit 1
