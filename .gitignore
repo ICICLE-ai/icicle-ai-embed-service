@@ -6,3 +6,7 @@ __pycache__/
 *.gguf
 models/
 .DS_Store
+benchmarks
+.vscode
+.cursor
+.claude

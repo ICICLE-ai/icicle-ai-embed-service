@@ -65,6 +65,13 @@ cp .env.example .env
 | `TAPIS_TENANT_ID`        | no       | Allowed Tapis tenant. Defaults to `icicleai`.                                                        |
 | `APP_ENV`                | no       | `dev` or `prod`.                                                                                     |
 | `ALLOWED_ORIGINS`        | no       | JSON array of CORS origins. Defaults to `["*"]`.                                                     |
+| `CACHE_ENABLED`          | no       | Enable the Redis query-embedding cache. Default `true`. Fail-open — if Redis is down, embedding still works. |
+| `REDIS_URL`              | no       | Redis connection URL. Default `redis://localhost:6379/0`.                                            |
+| `REDIS_TIMEOUT_SECONDS`  | no       | Redis connect/command timeout (s). Default `0.5`, short so a slow cache can't stall a request.       |
+| `CACHE_TTL_SECONDS`      | no       | TTL for cached vectors. Default `2592000` (30 days). LRU eviction is the real bound.                 |
+| `CACHE_KEY_PREFIX`       | no       | Cache key prefix. Bump to invalidate the whole cache (e.g. after a model change). Default `emb:v1:`. |
+| `REDIS_MAXMEMORY`        | no       | Redis memory budget (e.g. `800mb`). Blank = let the Redis/pod config own it.                         |
+| `REDIS_MAXMEMORY_POLICY` | no       | Eviction policy when `maxmemory` is hit. Default `allkeys-lru`.                                       |
 
 
 ### Step 2: Install and Run
@@ -102,7 +109,7 @@ Every request (except `/healthz`) requires a valid **ICICLE AI tenant** Tapis ac
 
 ### How to get your access token
 
-Log in to the [ICICLEaaS Portal](https://icicleai.tapis.io), click your username in the bottom-left corner, and select **Copy Access Token**.
+Log in to the [ICICLE AI Portal](https://icicleai.tapis.io), click your username in the bottom-left corner, and select **Copy Access Token**.
 
 
 | Scenario                   | Status | Response                                                                        |
@@ -216,19 +223,6 @@ curl -X POST http://localhost:8000/v1/embeddings \
 
 For retrieval, embed the query with `input_type: "query"` and POST the resulting vector to `/v1/retrieve` on the vector service.
 
-## How to Pick a Quant
-
-All files live in [`Qwen/Qwen3-Embedding-0.6B-GGUF`](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF). Drop the filename into `MODEL_FILE`.
-
-
-| File                              | Size    | RAM     | Quality vs fp16 | When to use                                       |
-| --------------------------------- | ------- | ------- | --------------- | ------------------------------------------------- |
-| `Qwen3-Embedding-0.6B-Q8_0.gguf`  | ~650 MB | ~800 MB | ~99.9%          | Default. Tight fidelity, low memory.              |
-| `Qwen3-Embedding-0.6B-f16.gguf`   | ~1.2 GB | ~1.5 GB | 100%            | Reference / benchmarking.                         |
-
-
-For larger Qwen variants, swap `MODEL_REPO` to `Qwen/Qwen3-Embedding-4B-GGUF` (dim 2560) or `Qwen/Qwen3-Embedding-8B-GGUF` (dim 4096) and pick a matching quant file.
-
 ## Troubleshooting
 
 - **"Failed to initialise embedder" at startup**: the service exits if it can't load the model. Check `MODEL_PATH` (file exists?) or that you have network access to Hugging Face on first boot.
@@ -245,9 +239,9 @@ For larger Qwen variants, swap `MODEL_REPO` to `Qwen/Qwen3-Embedding-4B-GGUF` (d
 
 ## Architecture
 
-![ICICLE AI Embed Service architecture](assets/icicle-embed-service-architecture.png)
+![ICICLE AI Embed Service — runtime flow with Redis embedding cache](assets/icicle-embed-service-architecture-cache.png)
 
-The diagram above shows how the service sits between client requests and the underlying model on Tapis Pods, with persistent volume storage for cached GGUF weights and the workflow-driven path from GitHub to GHCR to the running pod.
+This is how it works: the client calls `/v1/embed`, the FastAPI app authenticates the request (Tapis JWT), and the embeddings come back either from the **Redis cache** (a hit returns the cached vector) or from the **llama.cpp embedder** (a miss computes the vector). Freshly computed query vectors are written back to Redis asynchronously (write-behind), so the next identical query is a cache hit. The cache is optional and fail-open — if Redis is unavailable, requests still embed normally.
 
 For a closer look at what happens **inside** a single request — auth, validation, the serialized embedder, and pooling — the textual flow below maps to the actual code path in `src/app/`:
 
