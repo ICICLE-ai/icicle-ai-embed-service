@@ -13,6 +13,7 @@ dependencies = [
   "pyjwt[crypto]>=2.9",
   "llama-cpp-python>=0.3.2",
   "huggingface-hub>=0.24",
+  "redis>=5.0",
 ]
 
 [project.optional-dependencies]
@@ -37,3 +38,9 @@ asyncio_mode = "auto"
 markers = [
   "live: live smoke tests against a real running service (slow, opt-in)",
 ]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.11"
+extraPaths = ["src"]
