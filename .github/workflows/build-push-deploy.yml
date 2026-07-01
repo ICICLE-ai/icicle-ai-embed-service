@@ -143,8 +143,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-and-push-images]
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
-    # ~2 min sleep + bounded HTTP; fail fast if deploy is wedged.
-    timeout-minutes: 12
+    # ~2 min grace + gentle health polling; a model-loading pod can take 6-7 min.
+    timeout-minutes: 15
 
     steps:
       # The pod lives in the icicleai tenant, so the API URL is icicleai.tapis.io.
@@ -162,26 +162,28 @@ jobs:
 
       # Give the pod time to be re-spun before we even start polling. After a
       # restart it sits in a creating/starting phase, and the model load in the
-      # lifespan delays /healthz further — so hit it too early and it errors out.
+      # lifespan delays /healthz by minutes — so hitting it too early just errors.
       - name: Wait for pod restart
         run: sleep 120
 
-      # Poll instead of failing on the first error: the pod may still be starting
-      # when we begin. Budget ~180s of retries (well over the 90s minimum buffer)
-      # so a slow-to-start pod doesn't crash the deploy.
-      - name: Check production health
-        timeout-minutes: 5
+      # Then wait gracefully instead of tight-polling: hit /healthz on a gentle
+      # 20s interval and succeed as soon as it answers, but keep waiting up to
+      # ~8 more minutes so a slow model load (6-7 min total) doesn't fail the
+      # deploy. Early-exits the moment the pod is healthy.
+      - name: Wait for production health
+        timeout-minutes: 10
         run: |
           URL="${{ vars.PROD_BASE_URL }}/healthz"
-          for attempt in $(seq 1 30); do
-            if curl --fail --show-error --silent \
-                 --connect-timeout 10 --max-time 15 "$URL"; then
-              echo ""
-              echo "Service healthy (attempt ${attempt}/30)."
-              exit 0
+          DEADLINE=$(( SECONDS + 480 ))   # ~8 min of grace after the initial sleep
+          attempt=0
+          until curl --fail --show-error --silent \
+                  --connect-timeout 10 --max-time 15 "$URL" >/dev/null; do
+            if (( SECONDS >= DEADLINE )); then
+              echo "Service did not become healthy within the wait window."
+              exit 1
             fi
-            echo "Attempt ${attempt}/30: pod not ready yet, retrying in 6s..."
-            sleep 6
+            attempt=$(( attempt + 1 ))
+            echo "Not healthy yet (attempt ${attempt}); waiting 20s ..."
+            sleep 20
           done
-          echo "Service did not become healthy within the polling window."
-          exit 1
+          echo "Service healthy after ${attempt} poll(s)."
