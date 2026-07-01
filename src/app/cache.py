@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from array import array
 from typing import TYPE_CHECKING, cast
 
@@ -65,6 +66,7 @@ class EmbeddingCache:
             )
             return
         assert _Redis is not None  # guaranteed by self._enabled
+        start = time.monotonic()
         try:
             self._redis = _Redis.from_url(
                 settings.redis_url,
@@ -74,13 +76,21 @@ class EmbeddingCache:
             await self._redis.ping()
             await self._apply_eviction_policy()
             logger.info(
-                "Embedding cache connected: %s (ttl=%ss, prefix=%s)",
+                "Embedding cache connected: %s in %.3fs (ttl=%ss, prefix=%s)",
                 settings.redis_url,
+                time.monotonic() - start,
                 self._ttl,
                 self._prefix,
             )
         except Exception as exc:
-            logger.warning("Cache unavailable — running without it: %s", exc)
+            logger.warning(
+                "Cache unavailable — running without it after %.3fs "
+                "(url=%s, timeout=%ss): %s",
+                time.monotonic() - start,
+                settings.redis_url,
+                settings.redis_timeout_seconds,
+                exc,
+            )
             self._redis = None
 
     async def _apply_eviction_policy(self) -> None:
