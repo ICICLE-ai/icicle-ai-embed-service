@@ -18,6 +18,10 @@ class UserContext:
     username: str
     tenant_id: str
     claims: dict[str, Any]
+    # The raw, already-validated X-Tapis-Token. Retained so downstream work
+    # (e.g. logging anonymous metrics to a Tapis-gated MLflow pod) can reuse the
+    # caller's own credentials instead of a separate service account.
+    token: str
 
 
 @lru_cache(maxsize=1)
@@ -97,4 +101,6 @@ async def get_current_user(
         )
     tenant_id = claims["tapis/tenant_id"]
     logger.info("Authenticated user '%s' (tenant: %s)", username, tenant_id)
-    return UserContext(username=username, tenant_id=tenant_id, claims=claims)
+    return UserContext(
+        username=username, tenant_id=tenant_id, claims=claims, token=x_tapis_token
+    )

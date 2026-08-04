@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -11,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .auth import UserContext, get_current_user
 from .cache import get_cache
 from .embedder import Embedder, get_embedder, init_embedder
+from .metrics import get_metrics
 from .schemas import EmbedItem, EmbedRequest, EmbedResponse, ModelInfoResponse
 from .settings import settings
 
@@ -35,6 +37,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ) from exc
     # Cache is optional and fail-open; connect after the model is ready.
     await get_cache().connect()
+    # Metrics are optional and fail-open; nothing to connect, just announce.
+    get_metrics().announce()
     logger.info("Embedder ready.")
     yield
     await get_cache().close()
@@ -85,19 +89,24 @@ async def _embed_texts(
     normalize: bool,
     background_tasks: BackgroundTasks,
     username: str,
-) -> list[list[float]]:
+) -> tuple[list[list[float]], int, int]:
     """Embed `texts`, serving query vectors from Redis when possible.
 
     Only queries are cached: documents are embedded once and live in the vector
     service, so caching them mostly wastes memory. Cache misses are logged, the
     embedder runs only on the misses, and the cache is populated asynchronously
     (write-behind) after the response is sent.
+
+    Returns the vectors plus the number of cache hits and misses (misses = texts
+    actually run through the embedder). When caching does not apply (documents or
+    cache unavailable) every text is a "miss" — it was computed, not served.
     """
     cache = get_cache()
     if not is_query or not cache.available:
-        return await run_sync(
+        vectors = await run_sync(
             embedder.embed, texts, is_query, instruction, normalize
         )
+        return vectors, 0, len(texts)
 
     keys = [
         cache.make_key(embedder.model_name, "query", instruction, normalize, t)
@@ -133,7 +142,8 @@ async def _embed_texts(
             username,
         )
 
-    return results  # type: ignore[return-value]  # all None entries filled above
+    # all None entries filled above
+    return results, hits, len(miss_idx)  # type: ignore[return-value]
 
 
 @app.post("/v1/embed", response_model=EmbedResponse)
@@ -145,6 +155,7 @@ async def embed(
 ) -> EmbedResponse:
     texts = [payload.input] if isinstance(payload.input, str) else payload.input
     is_query = payload.input_type == "query"
+    total_chars = sum(len(t) for t in texts)
 
     # Log shape, never the text itself.
     logger.info(
@@ -153,10 +164,11 @@ async def embed(
         current_user.username,
         payload.input_type,
         payload.normalize,
-        sum(len(t) for t in texts),
+        total_chars,
     )
 
-    vectors = await _embed_texts(
+    started = time.perf_counter()
+    vectors, cache_hits, cache_misses = await _embed_texts(
         embedder,
         texts,
         is_query,
@@ -165,6 +177,28 @@ async def embed(
         background_tasks,
         current_user.username,
     )
+    latency_ms = (time.perf_counter() - started) * 1000.0
+
+    # Anonymous metrics only (no username/tenant/text). Fires after the response
+    # is sent and is fully fail-open, so it never affects latency or the request.
+    metrics = get_metrics()
+    if metrics.enabled:
+        background_tasks.add_task(
+            metrics.log_embed,
+            current_user.token,
+            {
+                "n_texts": float(len(texts)),
+                "total_chars": float(total_chars),
+                "cache_hits": float(cache_hits),
+                "cache_misses": float(cache_misses),
+                "latency_ms": latency_ms,
+            },
+            {
+                "model": embedder.model_name,
+                "input_type": payload.input_type,
+                "normalized": str(payload.normalize),
+            },
+        )
 
     data = [EmbedItem(index=i, embedding=v) for i, v in enumerate(vectors)]
     return EmbedResponse(
