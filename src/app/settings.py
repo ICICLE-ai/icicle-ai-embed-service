@@ -36,5 +36,11 @@ class Settings(BaseSettings):
     redis_maxmemory: str | None = None
     redis_maxmemory_policy: str | None = "allkeys-lru"
 
+    # --- Metrics (MLflow, optional & fail-open) ---
+    mlflow_enabled: bool = False
+    mlflow_tracking_uri: str = ""
+    mlflow_experiment: str = "icicle-ai-embed-service"
+    mlflow_timeout_seconds: float = 2.0
+
 
 settings = Settings()  # type: ignore[call-arg]
