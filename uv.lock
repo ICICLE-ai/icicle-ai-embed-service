@@ -383,6 +383,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "huggingface-hub" },
     { name = "llama-cpp-python" },
     { name = "pydantic" },
@@ -405,6 +406,7 @@ test = [
 requires-dist = [
     { name = "cryptography", marker = "extra == 'test'", specifier = ">=42.0" },
     { name = "fastapi", specifier = ">=0.110" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27" },
     { name = "huggingface-hub", specifier = ">=0.24" },
     { name = "llama-cpp-python", specifier = ">=0.3.2" },

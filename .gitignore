@@ -7,6 +7,7 @@ __pycache__/
 models/
 .DS_Store
 benchmarks
+benchmark/
 .vscode
 .cursor
 .claude
