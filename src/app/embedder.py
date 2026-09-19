@@ -72,6 +72,10 @@ class Embedder:
         )
         if settings.n_threads > 0:
             kwargs["n_threads"] = settings.n_threads
+            # Embeddings are pure prompt processing, which runs on n_threads_batch.
+            # Left unset, llama-cpp-python defaults it to multiprocessing.cpu_count(),
+            # which reports the host's cores and ignores the container's CPU limit.
+            kwargs["n_threads_batch"] = settings.n_threads
 
         self._llm = Llama(**kwargs)
         # llama-cpp-python's embed() mutates the shared context; serialize access.
