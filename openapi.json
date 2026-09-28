@@ -3,7 +3,7 @@
   "info": {
     "title": "ICICLE AI Embed Service",
     "description": "Local embedding generator built on llama-cpp-python + Qwen3-Embedding GGUF. Takes text in, returns vectors that can be stored via the ICICLE AI Vector Service. All endpoints (except /healthz) require a valid X-Tapis-Token from the icicleai tenant.",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "paths": {
     "/healthz": {

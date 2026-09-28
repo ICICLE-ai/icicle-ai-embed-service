@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="ICICLE AI Embed Service",
-    version="0.1.0",
+    version="0.2.0",
     description=(
         "Local embedding generator built on llama-cpp-python + Qwen3-Embedding GGUF. "
         "Takes text in, returns vectors that can be stored via the ICICLE AI Vector Service. "
