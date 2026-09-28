@@ -55,7 +55,7 @@ cp .env.example .env
 | `MODEL_REPO`             | no       | Hugging Face repo id. Default `Qwen/Qwen3-Embedding-0.6B-GGUF`.                                      |
 | `MODEL_FILE`             | no       | Quant file inside the repo. Default `Qwen3-Embedding-0.6B-Q8_0.gguf`.                                |
 | `N_CTX`                  | no       | Context window in tokens. Default `8192`. Model max is `32768`.                                      |
-| `N_THREADS`              | no       | CPU threads. `0` = let llama.cpp pick.                                                               |
+| `N_THREADS`              | no       | CPU threads per worker, used for both generation and batch (prompt) processing. `0` = let llama.cpp pick. In containers, set it to the CPU limit; llama.cpp otherwise sees the host's cores. |
 | `N_GPU_LAYERS`           | no       | Layers to offload to GPU. `-1` = all (default), `0` = pure CPU. On macOS this enables Metal.         |
 | `N_BATCH`                | no       | Compute-graph batch size. Default `512`.                                                             |
 | `MAX_INPUTS_PER_REQUEST` | no       | DOS guard. Cap on the number of strings per `/v1/embed` call. Default `256`.                        |
@@ -72,6 +72,10 @@ cp .env.example .env
 | `CACHE_KEY_PREFIX`       | no       | Cache key prefix. Bump to invalidate the whole cache (e.g. after a model change). Default `emb:v1:`. |
 | `REDIS_MAXMEMORY`        | no       | Redis memory budget (e.g. `800mb`). Blank = let the Redis/pod config own it.                         |
 | `REDIS_MAXMEMORY_POLICY` | no       | Eviction policy when `maxmemory` is hit. Default `allkeys-lru`.                                       |
+| `MLFLOW_ENABLED`         | no       | Log anonymous per-request metrics to MLflow. Default `false`. Fail-open — if MLflow is down, embedding still works. |
+| `MLFLOW_TRACKING_URI`    | no       | MLflow server URL. Required when `MLFLOW_ENABLED=true`.                                              |
+| `MLFLOW_EXPERIMENT`      | no       | MLflow experiment name. Default `icicle-ai-embed-service`.                                           |
+| `MLFLOW_TIMEOUT_SECONDS` | no       | Timeout (s) for each MLflow call. Default `2.0`.                                                     |
 
 
 ### Step 2: Install and Run
@@ -230,6 +234,8 @@ For retrieval, embed the query with `input_type: "query"` and POST the resulting
 - **`422` "input list exceeds max_inputs_per_request"**: split the request, or raise `MAX_INPUTS_PER_REQUEST` if your deployment can absorb it.
 - **`422` "input exceeds max_chars_per_input"**: chunk the text on the client; this service does no chunking.
 - **Slow first request**: model load happens at startup, but the first embedding triggers JIT compilation of the compute graph. Subsequent requests are much faster.
+- **Slow embeddings in a container**: set `N_THREADS` to the container's CPU limit. If it is left at `0`, llama.cpp sizes its thread pool from the host's cores and oversubscribes the CPU.
+- **Redis or MLflow unreachable**: requests keep working. The cache and metrics fail open and log a warning. Check `REDIS_URL` / `MLFLOW_TRACKING_URI` and network access from the pod.
 - **High RAM**: lower `N_CTX` (e.g. `2048`) or move from f16 to Q8_0.
 - **No GPU acceleration on Mac**: confirm `llama-cpp-python` was installed on Apple Silicon Python, not under Rosetta. `python -c "import platform; print(platform.machine())"` should print `arm64`.
 
@@ -312,6 +318,8 @@ For a closer look at what happens **inside** a single request — auth, validati
 - **Pooling type comes from the GGUF**: Qwen3-Embedding uses last-token pooling, baked into the file's metadata. Overriding `pooling_type` would silently corrupt the vectors.
 - **Instruction-aware by default**: Qwen3-Embedding expects query/document asymmetry. The `input_type` flag keeps clients from having to format the template themselves; `instruction` lets advanced users override it per-request.
 - **L2-normalize by default**: the vector service uses cosine similarity; normalized vectors make scores comparable across models and turn dot product into cosine.
+- **Cache queries, not documents**: queries repeat, while documents are embedded once and then live in the vector service. The Redis cache therefore stores only query vectors, writes them after the response is sent (write-behind), and fails open.
+- **Optional, anonymous usage metrics**: MLflow logging runs as a background task after the response, so it adds no request latency. It authenticates with the caller's own Tapis token, so the service needs no MLflow service account.
 - **No server-side chunking**: the service embeds what it's given. Callers own chunking, because chunk strategy is domain-specific.
 - **Auth boundary mirrors the vector service**: same Tapis JWT validation (signature + issuer + access-token-type + tenant). One token works across the embed→store→retrieve pipeline.
 
@@ -321,11 +329,12 @@ For a closer look at what happens **inside** a single request — auth, validati
 - **No request-body logging**. Logs include payload shape (`len(texts)`, `total_chars`) and the authenticated `username`, never the raw input text. Tokens are never logged.
 - **Request size limits**. `MAX_INPUTS_PER_REQUEST` and `MAX_CHARS_PER_INPUT` cap how much work a single request can ask for, validated by Pydantic before the embedder is touched.
 - **Single shared model context**. Requests are serialized at the embedder level so a malicious client cannot race the GGUF context into an inconsistent state.
-- **No outbound network at request time**. The only network call is the one-time `huggingface_hub` download at startup, skipped entirely when `MODEL_PATH` is set.
+- **Limited outbound network**. Besides the one-time `huggingface_hub` download at startup (skipped when `MODEL_PATH` is set), the only outbound calls are to Redis (query cache) and, when `MLFLOW_ENABLED=true`, to the MLflow server. Both are optional and fail-open.
+- **Anonymous metrics only**. MLflow receives request shape only: batch size, character count, cache hits/misses, latency, model and input type. It never receives the username, tenant, token claims or input text. The caller's own validated `X-Tapis-Token` is used only to authenticate those MLflow calls and is never logged.
 - **Container hygiene**. The Docker image runs as a non-root `app` user, ships only runtime libs (no compilers in the final layer), and writes the model cache into a mountable volume so weights persist across restarts without baking into the image.
 - **Fail-closed startup**. If model load fails, the process exits with a clear message rather than serving a half-initialized embedder.
 
-> **Data handling notice:** input text is held in memory only for the duration of the request. Nothing is persisted by this service.
+> **Data handling notice:** input text is held in memory only for the duration of the request and is never stored. When the cache is enabled, **query** vectors are stored in Redis under a SHA-256 hash of the request (model, instruction, normalize flag, text), expiring after `CACHE_TTL_SECONDS`. Document vectors are never cached.
 
 ---
 

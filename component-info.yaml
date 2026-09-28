@@ -1,0 +1,17 @@
+- id: "ICICLEAIEmbedService:0.2.0"
+  owner: "Amit Vyas"
+  primaryThrust: "core/CI4AI"
+  name: "ICICLE AI Embedding Service"
+  status: "BetaRelease"
+  description: "FastAPI service that turns text into embedding vectors using Qwen3-Embedding-0.6B (GGUF quantized) via llama-cpp-python, designed for the ICICLE AI Tapis tenant."
+  componentVersion: "0.2.0"
+  targetIcicleRelease: "2026-09"
+  hasDependentComponents:
+    - related_to: "ICICLEAIEmbedService:0.1.0"
+      relationship_type: "DependsOn"
+  codeReviewConducted: true
+  testsWritten: true
+  developerDocumentationAvailable: true
+  developerDocumentationUrl: "https://icicle-ai.github.io/training-catalog/api/ICICLE%20Embedding%20Service/icicle-ai-embed-service"
+  trainingTutorialsAvailable: true
+  trainingTutorialsUrl: "https://icicle-ai.github.io/training-catalog/docs/ICICLE%20Embedding%20Service"

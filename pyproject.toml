@@ -1,6 +1,6 @@
 [project]
 name = "icicle-ai-embed-service"
-version = "0.1.0"
+version = "0.2.0"
 description = "ICICLE AI Embedding Service (FastAPI + llama-cpp + Qwen3-Embedding GGUF)"
 requires-python = ">=3.11"
 readme = "README.md"
